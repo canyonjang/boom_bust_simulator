@@ -32,7 +32,18 @@ if "role" not in st.session_state:
             if name:
                 res = supabase.table("cycle_students").select("*").eq("name", name).eq("class_name", class_name).execute()
                 if not res.data:
-                    assigned_group = random.choice(["Boom", "Bust"])
+                    # Boom / Bust 50:50 균등 배정 로직
+                    counts = supabase.table("cycle_students").select("group_type").eq("class_name", class_name).execute()
+                    boom_count = sum(1 for row in counts.data if row['group_type'] == 'Boom')
+                    bust_count = sum(1 for row in counts.data if row['group_type'] == 'Bust')
+                    
+                    if boom_count > bust_count:
+                        assigned_group = "Bust"
+                    elif bust_count > boom_count:
+                        assigned_group = "Boom"
+                    else:
+                        assigned_group = random.choice(["Boom", "Bust"])
+                        
                     supabase.table("cycle_students").insert({
                         "name": name, 
                         "class_name": class_name, 
@@ -86,7 +97,7 @@ if st.session_state.role == "student":
         st.info("다른 친구들이 입장할 때까지 잠시 대기해 주세요. 교수님이 안내하면 새로고침을 누르세요.")
         
     elif phase == "실험시작":
-        # None 체크 적용
+        # None 체크 적용 (Python 문법)
         if student_data['investment'] is not None and student_data['fear_level'] is not None:
             st.success("✅ 자산 배분 결정을 성공적으로 제출했습니다! 교수 화면의 실시간 통계 분석을 확인하세요.")
             st.stop()
@@ -106,7 +117,14 @@ if st.session_state.role == "student":
         fear = st.slider("0: 공포 전혀 없음 ~ 6: 극심한 공포감", 0, 6, 3)
         st.write("---")
         st.write(f"**Q2. 당신에게 지금 확실한 자산 {INITIAL_ENDOWMENT:,} 원이 주어졌습니다. 이 중 얼마를 주식(위험 자산)에 투자하시겠습니까?**")
-        invest_amount = st.number_input("투자할 금액을 입력하세요 (원)", min_value=0, max_value=INITIAL_ENDOWMENT, step=100000, value=1000000)
+        
+        # 투자 금액 천단위 쉼표가 적용된 selectbox(선택칸)
+        invest_amount = st.selectbox(
+            "투자할 금액을 선택하세요 (원)", 
+            options=range(0, INITIAL_ENDOWMENT + 1, 100000), 
+            index=10, 
+            format_func=lambda x: f"{x:,}"
+        )
         
         if st.button("💼 최종 의사결정 제출", type="primary"):
             supabase.table("cycle_students").update({
@@ -125,11 +143,11 @@ if st.session_state.role == "student":
             if winning_result == "노란공 (성공)":
                 final_profit = keep_money + int(student_data['investment'] * 2.5)
                 st.balloons()
-                st.success(f"🎉 추첨 결과: [투자 성공!] 최종 자산: {final_profit:,} 원")
+                st.success(f"🎉 추첨 결과: **[노란공 - 투자 성공!]** 당신의 최종 자산은 **{final_profit:,} 원**입니다.")
             elif winning_result == "빨간공 (실패)":
-                st.error(f"💥 추첨 결과: [투자 실패] 최종 자산: {keep_money:,} 원")
+                st.error(f"💥 추첨 결과: **[빨간공 - 투자 실패]** 당신의 최종 자산은 **{keep_money:,} 원**입니다.")
             else:
-                st.info("교수님이 최종 추첨을 진행 중입니다!")
+                st.info("교수님이 최종 주사위(공)를 추첨할 때까지 메인 화면을 주목해 주세요!")
 
 # ==========================================
 # 👨‍🏫 교수 통제 화면
@@ -183,17 +201,21 @@ else:
             df_display.columns = ['이름', '시나리오', '투자 금액', '최종 금액']
             st.dataframe(df_display, use_container_width=True)
             
-            # 3. 추첨 인터페이스
-            st.subheader("🎲 시장 확률 추첨")
+            # 3. 최종 확률 추첨 복불복 인터페이스 (복원됨)
+            st.write("---")
+            st.subheader("🎲 최종 시장 확률 추첨 (50% 확률 복불복)")
             if winning_result == "미정":
-                col1, col2 = st.columns(2)
-                if col1.button("🟡 노란공"):
+                col_draw1, col_draw2 = st.columns(2)
+                if col_draw1.button("🟡 노란공 뽑기 (투자 성공!)", use_container_width=True):
                     supabase.table("cycle_status").update({"winning_ball": "노란공 (성공)"}).eq("class_name", my_class).execute()
                     st.rerun()
-                if col2.button("🔴 빨간공"):
+                if col_draw2.button("🔴 빨간공 뽑기 (투자 실패...)", use_container_width=True):
                     supabase.table("cycle_status").update({"winning_ball": "빨간공 (실패)"}).eq("class_name", my_class).execute()
                     st.rerun()
+            else:
+                st.success(f"🎯 최종 추첨 결과: **{winning_result}** 상태입니다.")
         
+        st.write("---")
         if st.button("⚠️ 데이터 초기화"):
             supabase.table("cycle_status").update({"current_phase": "대기", "winning_ball": "미정"}).eq("class_name", my_class).execute()
             supabase.table("cycle_students").delete().eq("class_name", my_class).execute()
