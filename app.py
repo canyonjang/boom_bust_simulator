@@ -114,9 +114,13 @@ if st.session_state.role == "student":
             
         st.write("---")
         st.subheader("🧠 심리 및 투자 의사결정문")
+        
+        # Q1 및 Q2 요구사항 반영 영역
+        st.write("**Q1. 당신은 현재 이 시장 그래프와 동향을 보았을 때, 어느 정도의 '공포(Fear)'를 느끼십니까?**")
         fear = st.slider("0: 공포 전혀 없음 ~ 6: 극심한 공포감", 0, 6, 3)
         st.write("---")
         st.write(f"**Q2. 당신에게 지금 확실한 자산 {INITIAL_ENDOWMENT:,} 원이 주어졌습니다. 이 중 얼마를 주식(위험 자산)에 투자하시겠습니까?**")
+        st.caption("※ 본 주식은 반반(50%)의 확률로 대박이 나거나 쪽박이 납니다. (성공 시 투자금의 2.5배 획득, 실패 시 투자금 전액 회수)")
         
         # 투자 금액 천단위 쉼표가 적용된 selectbox(선택칸)
         invest_amount = st.selectbox(
@@ -208,22 +212,39 @@ else:
             
             # 교수 교수용 해설 데이터 요약 테이블
             st.write("---")
+            st.markdown("### 📋 학생별 최종 성과 분석 보드")
+            
+            def calc_final(row):
+                if winning_result == "노란공 (성공)":
+                    return (INITIAL_ENDOWMENT - row['investment']) + (row['investment'] * 2.5)
+                elif winning_result == "빨간공 (실패)":
+                    return (INITIAL_ENDOWMENT - row['investment'])
+                return 0
+            
+            df['final_amount'] = df.apply(calc_final, axis=1)
+            
+            df_display = df[['name', 'group_type', 'investment', 'final_amount']].copy()
+            df_display['investment'] = df_display['investment'].apply(lambda x: f"{x:,} 원" if pd.notna(x) else "미제출")
+            df_display['final_amount'] = df_display['final_amount'].apply(lambda x: f"{int(x):,} 원" if winning_result != "미정" else "추첨 전")
+            
+            # 요구사항에 명시된 한글 컬럼 네이밍 지정
+            df_display.columns = ['이름', '시나리오 종류', '투자 금액', '최종 금액']
+            st.dataframe(df_display, use_container_width=True)
+            
+            st.write("---")
             st.markdown("### 💡 행동재무학적 인사이트 및 강의 가이드")
             for _, row in invest_chart.iterrows():
                 st.write(f"• **{row['그룹 유형']} 그룹**의 평균 투자액: **{int(row['평균 투자 금액 (원)']):,} 원**")
                 
             st.info("💡 **[Cohn et al. 2015 연구 재현 포인트]** 외부 환경이나 주식의 성공 확률(50%)은 두 그룹 모두 완벽하게 동일했습니다. 그럼에도 불구하고 단지 '폭락장 뉴스 그래프(Bust)'를 먼저 보았다는 사실만으로 인간의 뇌는 공포를 느끼며, 이 공포(Fear)가 위험회피 성향을 자극하여 투자액을 떨어뜨립니다. 이것이 투자자 심리가 시장의 하락 사이클을 비이성적으로 심화시키는 메커니즘입니다.")
             
-            # 3. 최종 확률 추첨 복불복 인터페이스
+            # 3. 최종 확률 추첨 복불복 인터페이스 (버튼 1개 무작위 무조건 배정으로 수정)
             st.write("---")
             st.subheader("🎲 최종 시장 확률 추첨 (50% 확률 복불복)")
             if winning_result == "미정":
-                col_draw1, col_draw2 = st.columns(2)
-                if col_draw1.button("🟡 노란공 뽑기 (투자 성공!)", use_container_width=True):
-                    supabase.table("cycle_status").update({"winning_ball": "노란공 (성공)"}).eq("class_name", my_class).execute()
-                    st.rerun()
-                if col_draw2.button("🔴 빨간공 뽑기 (투자 실패...)", use_container_width=True):
-                    supabase.table("cycle_status").update({"winning_ball": "빨간공 (실패)"}).eq("class_name", my_class).execute()
+                if st.button("🎲 시장 확률 무작위 추첨 (결과 자동 결정)", use_container_width=True, type="primary"):
+                    drawn_result = random.choice(["노란공 (성공)", "빨간공 (실패)"])
+                    supabase.table("cycle_status").update({"winning_ball": drawn_result}).eq("class_name", my_class).execute()
                     st.rerun()
             else:
                 st.success(f"🎯 최종 추첨 결과: **{winning_result}** 상태입니다.")
