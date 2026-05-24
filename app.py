@@ -154,54 +154,67 @@ if st.session_state.role == "student":
 # ==========================================
 else:
     st.title("👨‍🏫 주식시장 사이클 시뮬레이터 통제소")
-    if st.button("🔄 실시간 현황 새로고침", type="primary"):
-        st.rerun()
+    
+    col_p1, col_p2 = st.columns([2, 8])
+    with col_p1:
+        if st.button("🔄 실시간 현황 새로고침", type="primary"):
+            st.rerun()
+    with col_p2:
+        st.markdown(f"**현재 진행 단계:** {phase}")
+        
     st.write("---")
     
+    # 단계별 통제 관리자 버튼
     if phase == "대기":
         students_res = supabase.table("cycle_students").select("name").eq("class_name", my_class).execute()
         st.info(f"현재 강의실 입장 학생 수: {len(students_res.data)}명")
-        if st.button("🚀 실험 시작"):
+        if st.button("🚀 실험 시작 (학생 화면에 그래프 및 뉴스 노출)"):
             supabase.table("cycle_status").update({"current_phase": "실험시작"}).eq("class_name", my_class).execute()
             st.rerun()
             
     elif phase == "실험시작":
+        # 현재 제출 현황 분석
         students_data = supabase.table("cycle_students").select("*").eq("class_name", my_class).execute()
         df = pd.DataFrame(students_data.data)
+        
         if not df.empty and 'investment' in df.columns:
             submitted_df = df[df['investment'].notna()]
-            st.metric("의사결정 완료 학생 수", f"{len(submitted_df)} 명")
+            st.metric("의사결정 완료 학생 수", f"{len(submitted_df)} 명 / 총 {len(df)} 명")
+            
             if st.button("🏁 실험 마감 및 통계 분석 결과 공개"):
                 supabase.table("cycle_status").update({"current_phase": "종료"}).eq("class_name", my_class).execute()
                 st.rerun()
+        else:
+            st.write("아직 응답을 제출한 학생이 없습니다.")
             
     elif phase == "종료":
-        st.header("📊 실험 결과 분석")
+        st.header("📊 Cohn et al. (2015) 실험 결과 분석 (우리 강의실 실제 데이터)")
+        
         students_data = supabase.table("cycle_students").select("*").eq("class_name", my_class).execute()
         df = pd.DataFrame(students_data.data)
         
         if not df.empty:
-            # 1. 시각화
+            # 1. 공포 지수 분석 (Fear Level)
+            st.subheader("① 최근 시장 상황 노출에 따른 주관적 공포도(Fear Intensity) 비교")
             fear_chart = df.groupby('group_type')['fear_level'].mean().reset_index()
-            st.bar_chart(data=fear_chart, x='group_type', y='fear_level')
+            fear_chart.columns = ['그룹 유형', '평균 공포도 (0~6)']
+            st.bar_chart(data=fear_chart, x='그룹 유형', y='평균 공포도 (0~6)', use_container_width=True)
             
-            # 2. 학생별 상세 결과 테이블 (계산 포함)
-            def calc_final(row):
-                if winning_result == "노란공 (성공)":
-                    return (INITIAL_ENDOWMENT - row['investment']) + (row['investment'] * 2.5)
-                elif winning_result == "빨간공 (실패)":
-                    return (INITIAL_ENDOWMENT - row['investment'])
-                return 0
+            # 2. 투자 금액 분석 (Investment Amount)
+            st.subheader("② 그룹별 위험 자산 평균 투자 금액 비교 (원)")
+            invest_chart = df.groupby('group_type')['investment'].mean().reset_index()
+            invest_chart.columns = ['그룹 유형', '평균 투자 금액 (원)']
+            st.bar_chart(data=invest_chart, x='그룹 유형', y='평균 투자 금액 (원)', use_container_width=True)
             
-            df['final_amount'] = df.apply(calc_final, axis=1)
-            # 쉼표 포맷팅된 데이터프레임 표시
-            df_display = df[['name', 'group_type', 'investment', 'final_amount']].copy()
-            df_display['investment'] = df_display['investment'].apply(lambda x: f"{x:,} 원")
-            df_display['final_amount'] = df_display['final_amount'].apply(lambda x: f"{x:,} 원")
-            df_display.columns = ['이름', '시나리오', '투자 금액', '최종 금액']
-            st.dataframe(df_display, use_container_width=True)
+            # 교수 교수용 해설 데이터 요약 테이블
+            st.write("---")
+            st.markdown("### 💡 행동재무학적 인사이트 및 강의 가이드")
+            for _, row in invest_chart.iterrows():
+                st.write(f"• **{row['그룹 유형']} 그룹**의 평균 투자액: **{int(row['평균 투자 금액 (원)']):,} 원**")
+                
+            st.info("💡 **[Cohn et al. 2015 연구 재현 포인트]** 외부 환경이나 주식의 성공 확률(50%)은 두 그룹 모두 완벽하게 동일했습니다. 그럼에도 불구하고 단지 '폭락장 뉴스 그래프(Bust)'를 먼저 보았다는 사실만으로 인간의 뇌는 공포를 느끼며, 이 공포(Fear)가 위험회피 성향을 자극하여 투자액을 떨어뜨립니다. 이것이 투자자 심리가 시장의 하락 사이클을 비이성적으로 심화시키는 메커니즘입니다.")
             
-            # 3. 최종 확률 추첨 복불복 인터페이스 (복원됨)
+            # 3. 최종 확률 추첨 복불복 인터페이스
             st.write("---")
             st.subheader("🎲 최종 시장 확률 추첨 (50% 확률 복불복)")
             if winning_result == "미정":
@@ -216,7 +229,7 @@ else:
                 st.success(f"🎯 최종 추첨 결과: **{winning_result}** 상태입니다.")
         
         st.write("---")
-        if st.button("⚠️ 데이터 초기화"):
+        if st.button("⚠️ 이 분반 시뮬레이터 데이터 초기화", type="secondary"):
             supabase.table("cycle_status").update({"current_phase": "대기", "winning_ball": "미정"}).eq("class_name", my_class).execute()
             supabase.table("cycle_students").delete().eq("class_name", my_class).execute()
             st.rerun()
