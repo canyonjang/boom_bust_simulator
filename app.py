@@ -84,7 +84,7 @@ if st.session_state.role == "student":
         
     elif phase == "실험시작":
         # 이미 제출했는지 확인
-        if student_data['investment'] is not NULL and student_data['fear_level'] is not NULL:
+        if student_data['investment'] is not None and student_data['fear_level'] is not None:
             st.success("✅ 자산 배분 결정을 성공적으로 제출했습니다! 교수 화면의 실시간 통계 분석을 확인하세요.")
             st.stop()
             
