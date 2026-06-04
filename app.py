@@ -208,6 +208,10 @@ else:
             st.subheader("② 그룹별 위험 자산 평균 투자 금액 비교 (원)")
             invest_chart = df.groupby('group_type')['investment'].mean().reset_index()
             invest_chart.columns = ['그룹 유형', '평균 투자 금액 (원)']
+            
+            # NaN 결측치 처리 (제출자가 0명인 그룹 에러 방지)
+            invest_chart['평균 투자 금액 (원)'] = invest_chart['평균 투자 금액 (원)'].fillna(0)
+            
             st.bar_chart(data=invest_chart, x='그룹 유형', y='평균 투자 금액 (원)', use_container_width=True)
             
             # 교수 교수용 해설 데이터 요약 테이블
