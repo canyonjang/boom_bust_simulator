@@ -20,42 +20,48 @@ if "role" not in st.session_state:
     st.title("📈 주식시장 사이클 시뮬레이터")
     role = st.radio("접속 유형", ["학생", "교수"], horizontal=True)
     
-    # 학생은 분반 선택 없이 '인하대'로 자동 접속 (교수만 선택 가능)
-    if role == "교수":
-        class_name = st.selectbox("분반 선택", ["인하대", "숙대1", "숙대2"])
-    else:
-        class_name = "인하대" 
-
     if role == "학생":
+        st.info("교수님이 방을 열면 이름만 입력하여 자동으로 입장합니다.")
         name = st.text_input("이름을 입력하세요")
         if st.button("실험실 입장", type="primary"):
             if name:
-                res = supabase.table("cycle_students").select("*").eq("name", name).eq("class_name", class_name).execute()
-                if not res.data:
-                    # Boom / Bust 50:50 균등 배정 로직
-                    counts = supabase.table("cycle_students").select("group_type").eq("class_name", class_name).execute()
-                    boom_count = sum(1 for row in counts.data if row['group_type'] == 'Boom')
-                    bust_count = sum(1 for row in counts.data if row['group_type'] == 'Bust')
-                    
-                    if boom_count > bust_count:
-                        assigned_group = "Bust"
-                    elif bust_count > boom_count:
-                        assigned_group = "Boom"
-                    else:
-                        assigned_group = random.choice(["Boom", "Bust"])
+                # 활성화된 분반(대기, 종료가 아닌 상태) 자동 찾기
+                status_res = supabase.table("cycle_status").select("*").execute()
+                active_classes = [r["class_name"] for r in status_res.data if r["current_phase"] not in ["대기", "종료"]]
+                
+                if len(active_classes) == 1:
+                    class_name = active_classes[0]
+                    res = supabase.table("cycle_students").select("*").eq("name", name).eq("class_name", class_name).execute()
+                    if not res.data:
+                        # Boom / Bust 50:50 균등 배정 로직
+                        counts = supabase.table("cycle_students").select("group_type").eq("class_name", class_name).execute()
+                        boom_count = sum(1 for row in counts.data if row['group_type'] == 'Boom')
+                        bust_count = sum(1 for row in counts.data if row['group_type'] == 'Bust')
                         
-                    supabase.table("cycle_students").insert({
-                        "name": name, 
-                        "class_name": class_name, 
-                        "group_type": assigned_group
-                    }).execute()
-                st.session_state.role = "student"
-                st.session_state.name = name
-                st.session_state.class_name = class_name
-                st.rerun()
+                        if boom_count > bust_count:
+                            assigned_group = "Bust"
+                        elif bust_count > boom_count:
+                            assigned_group = "Boom"
+                        else:
+                            assigned_group = random.choice(["Boom", "Bust"])
+                            
+                        supabase.table("cycle_students").insert({
+                            "name": name, 
+                            "class_name": class_name, 
+                            "group_type": assigned_group
+                        }).execute()
+                    st.session_state.role = "student"
+                    st.session_state.name = name
+                    st.session_state.class_name = class_name
+                    st.rerun()
+                elif len(active_classes) == 0:
+                    st.error("현재 열려있는 방이 없습니다. 교수님이 입장을 허용할 때까지 기다려주세요.")
+                else:
+                    st.error("오류: 여러 분반이 동시에 활성화되어 있습니다. 교수님께 문의하세요.")
             else:
                 st.error("이름을 입력해주세요.")
     else:
+        class_name = st.selectbox("분반 선택", ["인하대", "숙대1", "숙대2"])
         pw = st.text_input("비밀번호", type="password")
         if st.button("교수 통제소 입장", type="primary"):
             if pw == "3383":
@@ -93,8 +99,8 @@ if st.session_state.role == "student":
     student_data = student_res.data[0]
     my_group = student_data['group_type']
     
-    if phase == "대기":
-        st.info("다른 친구들이 입장할 때까지 잠시 대기해 주세요. 교수님이 안내하면 새로고침을 누르세요.")
+    if phase == "대기" or phase == "학생입장":
+        st.info("성공적으로 접속되었습니다! 교수님이 다음 단계를 진행할 때까지 대기해 주세요.")
         
     elif phase == "실험시작":
         # None 체크 적용 (Python 문법)
@@ -170,9 +176,14 @@ else:
     
     # 단계별 통제 관리자 버튼
     if phase == "대기":
+        if st.button("🚀 1. 학생 입장 허용 (방 열기)", type="primary"):
+            supabase.table("cycle_status").update({"current_phase": "학생입장"}).eq("class_name", my_class).execute()
+            st.rerun()
+            
+    elif phase == "학생입장":
         students_res = supabase.table("cycle_students").select("name").eq("class_name", my_class).execute()
-        st.info(f"현재 강의실 입장 학생 수: {len(students_res.data)}명")
-        if st.button("🚀 실험 시작 (학생 화면에 그래프 및 뉴스 노출)"):
+        st.info(f"현재 방에 접속한 학생 수: {len(students_res.data)}명")
+        if st.button("🚀 2. 실험 시작 (학생 화면에 그래프 및 뉴스 노출)", type="primary"):
             supabase.table("cycle_status").update({"current_phase": "실험시작"}).eq("class_name", my_class).execute()
             st.rerun()
             
@@ -185,7 +196,7 @@ else:
             submitted_df = df[df['investment'].notna()]
             st.metric("의사결정 완료 학생 수", f"{len(submitted_df)} 명 / 총 {len(df)} 명")
             
-            if st.button("🏁 실험 마감 및 통계 분석 결과 공개"):
+            if st.button("🏁 3. 실험 마감 및 통계 분석 결과 공개", type="primary"):
                 supabase.table("cycle_status").update({"current_phase": "종료"}).eq("class_name", my_class).execute()
                 st.rerun()
         else:
@@ -238,7 +249,11 @@ else:
             st.write("---")
             st.markdown("### 💡 행동재무학적 인사이트 및 강의 가이드")
             for _, row in invest_chart.iterrows():
-                st.write(f"• **{row['그룹 유형']} 그룹**의 평균 투자액: **{int(row['평균 투자 금액 (원)']):,} 원**")
+                avg_invest = row['평균 투자 금액 (원)']
+                if pd.isna(avg_invest):
+                    st.write(f"• **{row['그룹 유형']} 그룹**: 아직 투자를 완료한 학생이 없습니다.")
+                else:
+                    st.write(f"• **{row['그룹 유형']} 그룹**의 평균 투자액: **{int(avg_invest):,} 원**")
                 
             st.info("💡 **[Cohn et al. 2015 연구 재현 포인트]** 외부 환경이나 주식의 성공 확률(50%)은 두 그룹 모두 완벽하게 동일했습니다. 그럼에도 불구하고 단지 '폭락장 뉴스 그래프(Bust)'를 먼저 보았다는 사실만으로 인간의 뇌는 공포를 느끼며, 이 공포(Fear)가 위험회피 성향을 자극하여 투자액을 떨어뜨립니다. 이것이 투자자 심리가 시장의 하락 사이클을 비이성적으로 심화시키는 메커니즘입니다.")
             
